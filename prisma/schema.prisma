@@ -61,20 +61,23 @@ model Tag {
   @@index([parentId])
 }
 
-/** flarum/stars + flarum/subscriptions: per-user state of a discussion */
+/** flarum/stars + flarum/subscriptions + core read-tracking: per-user state of a discussion */
 model DiscussionState {
-  id           String     @id @default(cuid())
-  userId       String
-  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  discussionId String
-  discussion   Discussion @relation(fields: [discussionId], references: [id], onDelete: Cascade)
-  starred      Boolean    @default(false) // flarum/stars
-  subscribed   Boolean    @default(false) // flarum/subscriptions: follow new replies
-  createdAt    DateTime   @default(now())
+  id                 String     @id @default(cuid())
+  userId             String
+  user               User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  discussionId       String
+  discussion         Discussion @relation(fields: [discussionId], references: [id], onDelete: Cascade)
+  starred            Boolean    @default(false) // flarum/stars
+  subscribed         Boolean    @default(false) // flarum/subscriptions: follow new replies
+  lastReadPostNumber Int        @default(0)     // flarum core read tracking (0 = never opened)
+  lastReadAt         DateTime?
+  createdAt          DateTime   @default(now())
 
   @@unique([userId, discussionId])
   @@index([discussionId, subscribed])
   @@index([userId, starred])
+  @@index([userId, lastReadPostNumber])
 }
 
 /** fof/follow-users */
@@ -143,9 +146,41 @@ model Post {
   replies      Post[]  @relation("PostReplyTo")
   createdAt    DateTime       @default(now())
   editedAt     DateTime?
+  isBestAnswer Boolean        @default(false) // fof/best-answer
+  bestAnswerSetAt DateTime?
   isHidden     Boolean        @default(false)
   votes        PostVote[]
   reactions    PostReaction[]
+  revisions    PostRevision[]
+  flags        Flag[]
+}
+
+/** flarum/edit-history: snapshot of pre-edit content */
+model PostRevision {
+  id        String   @id @default(cuid())
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId    String
+  content   String
+  createdAt DateTime @default(now())
+
+  @@index([postId])
+}
+
+/** flarum/flags: user reports on posts */
+model Flag {
+  id         String    @id @default(cuid())
+  postId     String
+  post       Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId     String
+  reason     String    // spam | inappropriate | off_topic | other
+  comment    String?
+  createdAt  DateTime  @default(now())
+  resolvedAt DateTime?
+  resolvedBy String?
+
+  @@unique([postId, userId])
+  @@index([resolvedAt])
 }
 
 model PostVote {

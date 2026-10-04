@@ -319,12 +319,33 @@ const TAG_FOLLOWS: [string, string][] = [
   ["test04", "courseScheduleApp"],
 ];
 
+// 最佳答案（fof/best-answer）— 楼主将某条回复选为最佳答案：[主题, 楼层]
+const BEST_ANSWERS: [string, number][] = [
+  ["d3", 2], // test01 将 test02 的 Class Widgets 回复选为最佳答案
+];
+
+// 举报演示（flarum/flags）— [主题, 楼层, 举报人, 原因, 补充说明]
+const FLAGS: [string, number, string, string, string][] = [
+  ["d5", 2, "test04", "other", "测试数据：用于验证举报队列与后台处理流程，管理员可直接忽略。"],
+];
+
+// 已读进度（flarum core read tracking）— [主题, 用户, 最后读到的楼层]
+const READ_STATE: [string, string, number][] = [
+  ["d1", "test01", 3], // d1 共 4 楼 → test01 还有 1 条未读
+  ["d1", "test02", 4],
+  ["d4", "test02", 1], // d4 共 3 楼 → test02 还有 2 条未读
+  ["d4", "test03", 3],
+  ["d3", "test04", 2],
+];
+
 /* ------------------------------------------------------------------ */
 /* 执行                                                                 */
 /* ------------------------------------------------------------------ */
 async function main() {
   console.log("Cleaning database...");
   await db.notification.deleteMany();
+  await db.flag.deleteMany();
+  await db.postRevision.deleteMany();
   await db.postReaction.deleteMany();
   await db.postVote.deleteMany();
   await db.discussionState.deleteMany();
@@ -480,6 +501,52 @@ async function main() {
     });
   }
 
+  // 最佳答案（fof/best-answer）
+  console.log("Seeding best answers...");
+  for (const [dk, num] of BEST_ANSWERS) {
+    await db.post.update({
+      where: { id: postIds[dk][num] },
+      data: { isBestAnswer: true, bestAnswerSetAt: ago(30) },
+    });
+  }
+
+  // 编辑历史（flarum/edit-history）：d5 楼 1 有编辑记录，补一份编辑前快照
+  console.log("Seeding edit history...");
+  {
+    const op = await db.post.findUnique({ where: { id: postIds.d5[1] }, select: { content: true } });
+    if (op) {
+      await db.postRevision.create({
+        data: {
+          postId: postIds.d5[1],
+          userId: users.test03,
+          content: op.content.replace(
+            "欢迎大家回复补充，我会不定期更新到正文。",
+            "初版清单：前 5 项，持续补充中。\n\n—— 这是编辑前的历史版本，用于演示编辑历史功能。"
+          ),
+          createdAt: ago(200),
+        },
+      });
+    }
+  }
+
+  // 举报（flarum/flags）
+  console.log("Seeding flags...");
+  for (const [dk, num, uname, reason, comment] of FLAGS) {
+    await db.flag.create({
+      data: { postId: postIds[dk][num], userId: users[uname], reason, comment, createdAt: ago(3) },
+    });
+  }
+
+  // 已读进度（flarum core read tracking）
+  console.log("Seeding read state...");
+  for (const [dk, uname, lastNum] of READ_STATE) {
+    await db.discussionState.upsert({
+      where: { userId_discussionId: { userId: users[uname], discussionId: discIds[dk] } },
+      update: { lastReadPostNumber: lastNum, lastReadAt: ago(20) },
+      create: { userId: users[uname], discussionId: discIds[dk], lastReadPostNumber: lastNum, lastReadAt: ago(20) },
+    });
+  }
+
   console.log("Seeding notifications...");
   const notif = (userId: string, type: string, actorId: string | null, dk: string | null, postNum: number | null, hoursAgo: number, read = false) =>
     db.notification.create({
@@ -499,6 +566,7 @@ async function main() {
   await notif(users.test01, "mention", users.test02, "d4", 1, 26);
   await notif(users.test01, "vote", users.admin, "d4", 2, 10);
   await notif(users.test02, "reply", users.test01, "d4", 2, 20);
+  await notif(users.test02, "bestAnswer", users.test01, "d3", 2, 30);
   await notif(users.test03, "newPost", users.test01, "d4", 2, 20);
   await notif(users.admin, "reply", users.test01, "d1", 2, 44, true);
   await notif(users.admin, "reply", users.test02, "d1", 3, 40);

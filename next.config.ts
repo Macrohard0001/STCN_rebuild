@@ -2,9 +2,6 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  typescript: {
-    ignoreBuildErrors: true,
-  },
   reactStrictMode: false,
   // hide the dev overlay badge (bottom-left "1 issue" indicator)
   devIndicators: false,
