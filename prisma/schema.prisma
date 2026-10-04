@@ -1,0 +1,185 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String         @id @default(cuid())
+  username      String         @unique
+  email         String         @unique
+  passwordHash  String
+  role          String         @default("user") // user | admin | moderator
+  avatarColor   String         @default("#668299") // letter-avatar background
+  bio           String?
+  score         Int            @default(0) // fof-gamification points
+  discussionCount Int          @default(0)
+  commentCount  Int            @default(0)
+  notifyPrefs   String         @default("") // JSON map of notification type -> enabled; empty = all enabled
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  lastSeenAt    DateTime       @default(now())
+  discussions   Discussion[]   @relation("DiscussionAuthor")
+  posts         Post[]         @relation("PostAuthor")
+  votes         PostVote[]
+  reactions     PostReaction[]
+  notifications Notification[] @relation("NotificationTarget")
+  actorNotes    Notification[] @relation("NotificationActor")
+  sessions      Session[]
+  states        DiscussionState[]
+  followers     UserFollow[]   @relation("UserFollowee")
+  followingUsers UserFollow[]  @relation("UserFollower")
+  tagFollows    TagFollow[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model Tag {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  slug        String   @unique
+  color       String   @default("#668299")
+  icon        String?
+  description String?
+  position    Int      @default(0)
+  parentId    String?
+  parent      Tag?     @relation("TagTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children    Tag[]    @relation("TagTree")
+  discussions TagDiscussion[]
+  follows     TagFollow[]
+
+  @@index([parentId])
+}
+
+/** flarum/stars + flarum/subscriptions: per-user state of a discussion */
+model DiscussionState {
+  id           String     @id @default(cuid())
+  userId       String
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  discussionId String
+  discussion   Discussion @relation(fields: [discussionId], references: [id], onDelete: Cascade)
+  starred      Boolean    @default(false) // flarum/stars
+  subscribed   Boolean    @default(false) // flarum/subscriptions: follow new replies
+  createdAt    DateTime   @default(now())
+
+  @@unique([userId, discussionId])
+  @@index([discussionId, subscribed])
+  @@index([userId, starred])
+}
+
+/** fof/follow-users */
+model UserFollow {
+  id          String   @id @default(cuid())
+  followerId  String
+  follower    User     @relation("UserFollower", fields: [followerId], references: [id], onDelete: Cascade)
+  followingId String
+  following   User     @relation("UserFollowee", fields: [followingId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+
+  @@unique([followerId, followingId])
+  @@index([followingId])
+}
+
+/** fof/follow-tags */
+model TagFollow {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tagId     String
+  tag       Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, tagId])
+  @@index([tagId])
+}
+
+model TagDiscussion {
+  tagId        String
+  discussionId String
+  tag          Tag       @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  discussion   Discussion @relation(fields: [discussionId], references: [id], onDelete: Cascade)
+  @@id([tagId, discussionId])
+}
+
+model Discussion {
+  id           String          @id @default(cuid())
+  title        String
+  authorId     String
+  author       User            @relation("DiscussionAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  createdAt    DateTime        @default(now())
+  lastPostedAt DateTime        @default(now())
+  commentCount Int             @default(1) // includes first post
+  viewCount    Int             @default(0)
+  isSticky     Boolean         @default(false)
+  stickyOrder  Int             @default(0)
+  isLocked     Boolean         @default(false)
+  isHidden     Boolean         @default(false)
+  posts        Post[]
+  tags         TagDiscussion[]
+  notifications Notification[] @relation("NotificationSubject")
+  states       DiscussionState[]
+}
+
+model Post {
+  id           String         @id @default(cuid())
+  number       Int
+  discussionId String
+  discussion   Discussion     @relation(fields: [discussionId], references: [id], onDelete: Cascade)
+  authorId     String
+  author       User           @relation("PostAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  content      String
+  replyToPostId String?
+  replyTo      Post?   @relation("PostReplyTo", fields: [replyToPostId], references: [id], onDelete: SetNull)
+  replies      Post[]  @relation("PostReplyTo")
+  createdAt    DateTime       @default(now())
+  editedAt     DateTime?
+  isHidden     Boolean        @default(false)
+  votes        PostVote[]
+  reactions    PostReaction[]
+}
+
+model PostVote {
+  id         String   @id @default(cuid())
+  postId     String
+  post       Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  value      Int      // 1 up, -1 down
+  createdAt  DateTime @default(now())
+  @@unique([postId, userId])
+}
+
+model PostReaction {
+  id        String   @id @default(cuid())
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String   // like 👍 | heart ❤ | laugh 😆 | surprise 😮 | sad 😢
+  createdAt DateTime @default(now())
+  @@unique([postId, userId, type])
+}
+
+model Notification {
+  id            String      @id @default(cuid())
+  userId        String      // recipient
+  user          User        @relation("NotificationTarget", fields: [userId], references: [id], onDelete: Cascade)
+  type          String      // reply | like | reaction | vote | mention | discussionLiked
+  actorId       String?
+  actor         User?       @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+  discussionId  String?
+  discussion    Discussion? @relation("NotificationSubject", fields: [discussionId], references: [id], onDelete: Cascade)
+  postId        String?
+  readAt        DateTime?
+  createdAt     DateTime    @default(now())
+}
